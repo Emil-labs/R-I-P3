@@ -1,2 +1,15 @@
 .DS_Store
 **/.DS_Store
+!/tutorial_scripts/figures/block_diagram_01.png
+
+!/tutorial_scripts/figures/block_diagram_02.png
+
+!/tutorial_scripts/figures/block_diagram_03.png
+
+!/tutorial_scripts/figures/block_diagram_04_ik.png
+
+!/tutorial_scripts/figures/block_diagram_04_path_planner.png
+
+!/tutorial_scripts/figures/block_diagram_04_traj.png
+
+!/tutorial_scripts/figures/block_diagram_project.png
