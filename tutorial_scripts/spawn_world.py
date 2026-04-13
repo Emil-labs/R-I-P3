@@ -1,14 +1,12 @@
 import os
 import numpy as np
-import pydot
-from IPython.display import SVG, display
 
-# Import necessary parts of Drake
-from pydrake.geometry import StartMeshcat, SceneGraph, Box as DrakeBox, HalfSpace
+# Drake imports
+from pydrake.geometry import StartMeshcat
 from pydrake.math import RigidTransform
 from pydrake.multibody.parsing import Parser
-from pydrake.multibody.plant import AddMultibodyPlantSceneGraph, MultibodyPlant, CoulombFriction
-from pydrake.multibody.tree import SpatialInertia, UnitInertia
+from pydrake.multibody.plant import AddMultibodyPlantSceneGraph
+from pydrake.multibody.tree import BodyIndex
 from pydrake.systems.analysis import Simulator
 from pydrake.systems.framework import DiagramBuilder
 from pydrake.visualization import AddDefaultVisualization, ModelVisualizer
@@ -16,20 +14,24 @@ from pydrake.visualization import AddDefaultVisualization, ModelVisualizer
 # --------------------------------------------------------------------
 # Global settings
 # --------------------------------------------------------------------
-# Start Meshcat visualizer: this will give you a link in the notebook/terminal
 meshcat = StartMeshcat()
 
-visualize = True  # If True: use ModelVisualizer interactively, if False: run a simulation
+visualize = False  # False = simulation + accès aux objets
 
-
+# Chemin robuste vers le SDF
+current_dir = os.path.dirname(os.path.abspath(__file__))
 model_path = os.path.join(
-    "..", "models", "objects_scenes", "project_03_shape_formation_t_world.sdf"
+    current_dir,
+    "..",
+    "models",
+    "objects_scenes",
+    "project_03_shape_formation_t_world.sdf"
 )
 
 # --------------------------------------------------------------------
-# Function: create_sim_scene
+# Create simulation scene
 # --------------------------------------------------------------------
-def create_sim_scene(sim_time_step):   
+def create_sim_scene(sim_time_step):
     meshcat.Delete()
     meshcat.DeleteAddedControls()
 
@@ -37,81 +39,85 @@ def create_sim_scene(sim_time_step):
     plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=sim_time_step)
 
     parser = Parser(plant)
-    world_model = parser.AddModelsFromUrl("file://" + os.path.abspath(model_path))[0]
+    parser.AddModelsFromUrl("file://" + os.path.abspath(model_path))
 
-
-    j1 = plant.GetJointByName("j2s7s300_joint_1")
-    j2 = plant.GetJointByName("j2s7s300_joint_2")
-    j3 = plant.GetJointByName("j2s7s300_joint_3")
-    j4 = plant.GetJointByName("j2s7s300_joint_4")
-    j5 = plant.GetJointByName("j2s7s300_joint_5")
-    j6 = plant.GetJointByName("j2s7s300_joint_6")
-    #j7 = plant.GetJointByName("j2s7s300_joint_7")
-
-    f1 = plant.GetJointByName("j2s7s300_joint_finger_1")
-    f2 = plant.GetJointByName("j2s7s300_joint_finger_2")
-    #f3 = plant.GetJointByName("j2s7s300_joint_finger_3")
-
-    # bras
-    j1.set_default_angle(-10.0)
-    j2.set_default_angle(1.0)  
-    j3.set_default_angle(0.0)
-    j4.set_default_angle(1.0)
-    j5.set_default_angle(0.0)
-    j6.set_default_angle(1.0)
-    #j7.set_default_angle(0.0)
-
-    # Doigts
-    f1.set_default_angle(0.0)
-    f2.set_default_angle(0.0)
-    #f3.set_default_angle(0.0)
-
-
+    # Le fichier sdf contient déjà tous les liens entre les joints ducoup pas besoin 
     plant.Finalize()
 
     AddDefaultVisualization(builder, meshcat)
     diagram = builder.Build()
-    return diagram
+
+    return diagram, plant
 
 # --------------------------------------------------------------------
-# Function: run_simulation
+# Run simulation
 # --------------------------------------------------------------------
 def run_simulation(sim_time_step):
-    """
-    Either run an interactive visualizer, or simulate the system.
-    """
-    if visualize:
-        # If visualize=True, just load and display the robot interactively
+
+    if visualize: #j'ai littéralement repris ce qu'ils ont expliqué dans le tuto 2 pour le visualize
         visualizer = ModelVisualizer(meshcat=meshcat)
         visualizer.parser().AddModelsFromUrl("file://" + os.path.abspath(model_path))
         visualizer.Run()
-        
+
     else:
-        # Otherwise, build the scene and simulate
-        diagram = create_sim_scene(sim_time_step)
+        diagram, plant = create_sim_scene(sim_time_step)
 
-        # Create and configure the simulator
-        simulator = Simulator(diagram)
-        simulator.set_target_realtime_rate(1.0)  # Try to match real time
-        simulator.Initialize()
-        simulator.set_publish_every_time_step(True)  # publish at each step
+        # Context Drake
+        context = diagram.CreateDefaultContext()
+        plant_context = plant.GetMyContextFromRoot(context)
 
-        sim_time = 5.0  # seconds of simulated time
+        # on va chercher les différents bodies
+        print("\n Les bodies :")
 
-        meshcat.StartRecording()         # Start recording the sim
-        simulator.AdvanceTo(sim_time)    # Runs the simulation for sim_time seconds
-        meshcat.PublishRecording()       # Publish recording to replay in Meshcat
+        for i in range(plant.num_bodies()):
+            body = plant.get_body(BodyIndex(i))
+            model_instance = body.model_instance()
+            model_name = plant.GetModelInstanceName(model_instance)
+
+            print(f"{body.name()} model: {model_name}")
+        
+        # Les cubes et les targets doivent d'office se trouver dans les bodies
+        cubes = []
+        targets = []
+
+        for i in range(plant.num_bodies()):
+            body = plant.get_body(BodyIndex(i))
+            model_name = plant.GetModelInstanceName(body.model_instance()).lower()
             
-        # Save system block diagram as PNG
-        svg_data = diagram.GetGraphvizString(max_depth=2)
-        graph = pydot.graph_from_dot_data(svg_data)[0]
-        image_path = "figures/block_diagram_02.png"
-        graph.write_png(image_path)
-        print(f"\nBlock diagram saved as: {image_path}")
+
+            if "cube" in model_name:
+                cubes.append(body)
+
+            if "target" in model_name:
+                targets.append(body)
+
+        # On recherche 
+        print("\n Cubes positions : ")
+        for cube in cubes:
+            X = plant.EvalBodyPoseInWorld(plant_context, cube)
+            print(cube.name(), X.translation())
+
+        # On recherche les coordonnées des targets
+        print("\n Targets positions : ")
+        for target in targets:
+            X = plant.EvalBodyPoseInWorld(plant_context, target)
+            print(target.name(), X.translation())
+
+        # -----------------------------
+        # Simulation
+        # -----------------------------
+        simulator = Simulator(diagram)
+        simulator.set_target_realtime_rate(1.0)
+        simulator.Initialize()
+
+        sim_time = 5.0
+
+        meshcat.StartRecording()
+        simulator.AdvanceTo(sim_time)
+        meshcat.PublishRecording()
 
 
 # --------------------------------------------------------------------
-# Run the simulation
+# MAIN
 # --------------------------------------------------------------------
-# Try playing with the time step (e.g. 0.001 vs 0.01 vs 0.1)
 run_simulation(sim_time_step=0.01)
