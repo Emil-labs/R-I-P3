@@ -3,13 +3,17 @@ import numpy as np
 
 # Drake imports
 from pydrake.geometry import StartMeshcat
-from pydrake.math import RigidTransform
+from pydrake.math import RigidTransform, RotationMatrix
 from pydrake.multibody.parsing import Parser
 from pydrake.multibody.plant import AddMultibodyPlantSceneGraph
 from pydrake.multibody.tree import BodyIndex
 from pydrake.systems.analysis import Simulator
 from pydrake.systems.framework import DiagramBuilder
 from pydrake.visualization import AddDefaultVisualization, ModelVisualizer
+from pydrake.all import (
+    InverseKinematics,
+    Solve,
+)
 
 # --------------------------------------------------------------------
 # Global settings
@@ -27,6 +31,78 @@ model_path = os.path.join(
     "objects_scenes",
     "project_03_shape_formation_t_world.sdf"
 )
+
+
+# --------------------------------------------------------------------
+# Create the IK Solver 
+# --------------------------------------------------------------------
+#pris du tuto 4
+def solve_ik(plant, context, frame_E, X_WE_desired):
+    """
+    Solves inverse kinematics for a given end-effector pose.
+
+    Args:
+        plant: MultibodyPlant
+        context: plant.CreateDefaultContext() or similar
+        frame_E: End-effector Frame (e.g. plant.GetFrameByName("ee"))
+        X_WE_desired: RigidTransform of desired world pose of end-effector
+
+    Returns:
+        q_solution: numpy array of joint positions if successful, else None
+    """
+    ik = InverseKinematics(plant, context)
+
+    # Set nominal joint positions to current positions
+    q_nominal = plant.GetPositions(context).reshape((-1, 1))
+
+    
+    # Constrain position and orientation
+    # Position constraint
+    p_AQ = X_WE_desired.translation().reshape((3, 1))
+    ik.AddPositionConstraint(
+        frameB=frame_E,
+        p_BQ=np.zeros((3, 1)),  # Here, p_BQ = [0, 0, 0] means we’re constraining the origin of the E frame.
+        frameA=plant.world_frame(),
+        p_AQ_lower=p_AQ,
+        p_AQ_upper=p_AQ
+    )
+
+    # Orientation constraint
+    theta_bound = 0.1 #c'était à 0.01  # radians
+    ik.AddOrientationConstraint(
+        frameAbar=plant.world_frame(),      # world frame
+        R_AbarA=X_WE_desired.rotation(),    # desired orientation
+        frameBbar=frame_E,                  # end-effector frame
+        R_BbarB=RotationMatrix(),           # current orientation
+        theta_bound=theta_bound             # allowable deviation
+    )
+
+    # Access the underlying MathematicalProgram to add costs and constraints manually.
+    prog = ik.prog()
+    q_var = ik.q()  # decision variables (joint angles)
+    # Add a quadratic cost to stay close to the nominal configuration:
+    #   cost = (q - q_nominal)^T * W * (q - q_nominal)
+    W = np.identity(q_nominal.shape[0])
+    prog.AddQuadraticErrorCost(W, q_nominal, q_var)
+
+    # Enforce joint position limits from the robot model.
+    lower = plant.GetPositionLowerLimits()
+    upper = plant.GetPositionUpperLimits()
+    prog.AddBoundingBoxConstraint(lower, upper, q_var)
+
+
+    # Solve the optimization problem using Drake’s default solver.
+    # The initial guess is the nominal configuration (q_nominal).
+    result = Solve(prog, q_nominal)
+
+    # Check if the solver succeeded and return the solution.
+    if result.is_success():
+        q_sol = result.GetSolution(q_var)
+        return q_sol
+    else:
+        print("IK did not converge!")
+        return None
+
 
 # --------------------------------------------------------------------
 # Create simulation scene
@@ -103,6 +179,15 @@ def run_simulation(sim_time_step):
             X = plant.EvalBodyPoseInWorld(plant_context, target)
             print(target.name(), X.translation())
 
+     #Application of IK to one Cube
+     
+        X_WE_desired = RigidTransform(
+            [0.56, -0.26, 0.255]) #copié collé du tuto 4 avec position trouvé dans le terminal
+        frame_E = plant.GetFrameByName("panda_hand") 
+
+        #make the robot go to that position in the Robot context (not the global)
+        q_target = solve_ik(plant, plant_context, frame_E, X_WE_desired) 
+
         # -----------------------------
         # Simulation
         # -----------------------------
@@ -110,7 +195,7 @@ def run_simulation(sim_time_step):
         simulator.set_target_realtime_rate(1.0)
         simulator.Initialize()
 
-        sim_time = 5.0
+        sim_time = 10.0
 
         meshcat.StartRecording()
         simulator.AdvanceTo(sim_time)
