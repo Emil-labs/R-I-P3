@@ -16,7 +16,7 @@ from pydrake.visualization import AddDefaultVisualization, ModelVisualizer
 # --------------------------------------------------------------------
 meshcat = StartMeshcat()
 
-visualize = False  # False = simulation + accès aux objets
+visualize = False # False = simulation + accès aux objets
 
 # Chemin robuste vers le SDF
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -120,4 +120,4 @@ def run_simulation(sim_time_step):
 # --------------------------------------------------------------------
 # MAIN
 # --------------------------------------------------------------------
-run_simulation(sim_time_step=0.01)
+run_simulation(sim_time_step=0.001)
