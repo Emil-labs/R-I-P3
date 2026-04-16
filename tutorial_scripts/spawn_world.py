@@ -22,7 +22,7 @@ meshcat = StartMeshcat()
 
 visualize = False # False = simulation + accès aux objets
 
-# Chemin robuste vers le SDF
+# path to the sdf file
 current_dir = os.path.dirname(os.path.abspath(__file__))
 model_path = os.path.join(
     current_dir,
@@ -181,13 +181,32 @@ def run_simulation(sim_time_step):
 
      #Application of IK to one Cube
      
-        X_WE_desired = RigidTransform(
-            [0.56, -0.26, 0.255]) #copié collé du tuto 4 avec position trouvé dans le terminal
-        frame_E = plant.GetFrameByName("panda_hand") 
+          # on prend le premier cube trouvé                   
+        cube_test = cubes[0]                               
+
+        # on récupère sa vraie position dans le monde      
+        X_WCube = plant.EvalBodyPoseInWorld(plant_context, cube_test)  # c'est mieux d'aller chercher la position dans 'le monde ' qu'on a crée que de la rentrer manuellement
+        p_cube = X_WCube.translation()                      # on extrait seulement la position du cube pas l'orientation (genre c'est comme la matrice homogeneous la forme)
+
+        # on vise une position au-dessus du cube et pas le centre du cube  
+        p_des = p_cube + np.array([0.0, 0.0, 0.20])        # c'est le meilleur moyen pour éviter les collisons de toujours se déplacer au dessus et de après descendre 
+        X_WE_desired = RigidTransform(p_des)               # cette position est la position désirée du end effector
+
+        frame_E = plant.GetFrameByName("panda_hand") # on récupère le frame de la main du robot (c'est ce frame qu'on va contraindre dans l'IK)
 
         #make the robot go to that position in the Robot context (not the global)
         q_target = solve_ik(plant, plant_context, frame_E, X_WE_desired) 
 
+        print("\n Test IK sur un cube :")                   # MODIF
+        print("Cube choisi :", plant.GetModelInstanceName(cube_test.model_instance()))   # MODIF
+        print("Position cube :", p_cube)                    # MODIF
+        print("Position désirée main :", p_des)             # MODIF
+
+        if q_target is not None:                            # MODIF
+            print("IK réussie")                             # MODIF
+            print("q_target =", q_target)                   # MODIF
+        else:                                               # MODIF
+            print("IK échouée")   
         # -----------------------------
         # Simulation
         # -----------------------------
