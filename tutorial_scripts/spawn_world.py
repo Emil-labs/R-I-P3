@@ -220,7 +220,6 @@ def run_simulation(sim_time_step):
         simulator.AdvanceTo(sim_time)
         meshcat.PublishRecording()
 
-
 # --------------------------------------------------------------------
 # MAIN
 # --------------------------------------------------------------------
