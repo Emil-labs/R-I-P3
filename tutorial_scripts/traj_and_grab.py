@@ -453,22 +453,27 @@ def create_sim_scene(sim_time_step):
     X_WCube = plant.EvalBodyPoseInWorld(plant_context, cube_test)
     p_cube = X_WCube.translation()
 
+ 
+    # Orientation pince vers le bas
+    R_down = RollPitchYaw(np.pi, 0, 0).ToRotationMatrix()
+
     #les différents points de positions
     p_above = p_cube + np.array([0, 0, 0.2])
     p_near = p_cube + np.array([0, 0, 0.02])
     p_lift = p_cube + np.array([0, 0, 0.25])
 
+
     # calcul transforms
-    X_above = RigidTransform(p_above)
-    X_near = RigidTransform(p_near)
-    X_lift = RigidTransform(p_lift)
+    X_above = RigidTransform(R_down, p_above)
+    X_near  = RigidTransform(R_down, p_near)
+    X_lift  = RigidTransform(R_down, p_lift)
 
 
     q_above = solve_ik(plant, plant_context, frame_E, X_above)
     q_near = solve_ik(plant, plant_context, frame_E, X_near)
     q_lift = solve_ik(plant, plant_context, frame_E, X_lift)
 
-    _above = set_gripper(q_above, open=True)
+    q_above = set_gripper(q_above, open=True)
     q_near = set_gripper(q_near, open=True)
     q_lift = set_gripper(q_lift, open=False)
 
