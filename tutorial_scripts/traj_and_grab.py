@@ -189,133 +189,101 @@ class Controller(LeafSystem):
 ######################################################################################################
 
 class JointSpaceTrajectorySystem(LeafSystem):
-    def __init__(self,q_start ,q_goal , v_max, a_max):
+    def __init__(self, waypoints, v_max, a_max):
         super().__init__()
-        self.q_start = np.array(q_start)
-        self.q_goal  = np.array(q_goal)
-        self.v_max   = np.broadcast_to(v_max, self.q_start.shape)
-        self.a_max   = np.broadcast_to(a_max, self.q_start.shape)
-        self.n = len(q_start)
-        # Precompute motion profiles for each joint.
-        # This sets up the timing and kinematic parameters (acceleration time,
-        # flat time, total duration, etc.) used later to evaluate q_ref(t) and qd_ref(t).
-        self._compute_profiles()
-        self.DeclareVectorOutputPort("joint_ref", BasicVector(2*self.n), self._output_reference)
+        
+        # waypoints = [q_start, q_above, q_near, q_lift, ...]
+        self.waypoints = [np.array(w) for w in waypoints]
+        self.n = len(self.waypoints[0])  # nombre de joints
+        
+        self.v_max = np.broadcast_to(v_max, (self.n,))
+        self.a_max = np.broadcast_to(a_max, (self.n,))
 
-    def _compute_profiles(self):
-        """
-        Precompute motion parameters for each joint.
+        # Calculer les profils pour chaque segment
+        self.segments = []       # liste de profils par segment
+        self.seg_offsets = [0.0] # temps de début de chaque segment
 
-        The trapezoidal velocity profile consists of three phases:
-        1. Acceleration with constant a_max
-        2. Constant velocity at v_max (flat section)
-        3. Deceleration with constant -a_max
+        for i in range(len(self.waypoints) - 1):
+            q_s = self.waypoints[i]
+            q_g = self.waypoints[i + 1]
+            profiles, duration = self._compute_profiles(q_s, q_g)
+            self.segments.append(profiles)
+            self.seg_offsets.append(self.seg_offsets[-1] + duration)
 
-        However, depending on the motion distance (Δq) and limits (v_max, a_max),
-        the profile can take two shapes:
+        self.DeclareVectorOutputPort(
+            "joint_ref", BasicVector(2 * self.n), self._output_reference
+        )
 
-            • **Trapezoidal** → when the joint reaches v_max before decelerating.
-            • **Triangular**  → when the joint does not reach v_max; 
-                                acceleration and deceleration phases overlap.
-
-        This method computes the timing parameters (t_acc, t_flat, T_total)
-        for each joint and ensures all joints are synchronized by using
-        the maximum duration among them.
-        """
-        self.profiles = []
-        self.duration = 0.0
-
+    def _compute_profiles(self, q_start, q_goal):
+        profiles = []
+        duration = 0.0
         for i in range(self.n):
-            q0, qf = self.q_start[i], self.q_goal[i]
+            q0, qf = q_start[i], q_goal[i]
             dq = qf - q0
             s = np.sign(dq) if dq != 0 else 1.0
             dq_abs = abs(dq)
             v = self.v_max[i]
             a = self.a_max[i]
 
-            # Acceleration time and peak velocity
             t_acc = v / a if a > 0 else 0.0
 
-            # Check for triangular vs. trapezoidal
             if dq_abs < a * t_acc**2:
-                # Triangular (no constant-velocity phase)
                 t_acc = np.sqrt(dq_abs / max(a, 1e-9))
                 t_flat = 0.0
                 v_peak = a * t_acc
             else:
-                # Trapezoidal (with constant velocity)
                 v_peak = v
                 t_flat = (dq_abs - a * t_acc**2) / max(v, 1e-9)
 
             T_trap = 2 * t_acc + t_flat
-            self.duration = max(self.duration, T_trap)
+            duration = max(duration, T_trap)
 
-            self.profiles.append(
-                {
-                    "q0": q0,
-                    "dq": dq,
-                    "s": s,
-                    "t_acc": t_acc,
-                    "t_flat": t_flat,
-                    "T": T_trap,
-                    "a": a,
-                    "v_peak": v_peak,
-                }
-            )
+            profiles.append({
+                "q0": q0, "dq": dq, "s": s,
+                "t_acc": t_acc, "t_flat": t_flat,
+                "T": T_trap, "a": a, "v_peak": v_peak,
+            })
+        return profiles, duration
 
     def _eval_trapezoid(self, t, p):
-        """
-        Compute joint position and velocity for a trapezoidal velocity profile.
-
-        Each joint moves following a constant-acceleration, constant-velocity,
-        constant-deceleration pattern. The parameter 's' ∈ {+1, -1} represents
-        the direction of motion (sign of Δq = q_goal - q_start).
-
-        Motion phases and equations:
-            1. Acceleration (0 ≤ t < t_acc)
-            q = q0 + s·½·a·t²
-            q̇ = s·a·t
-
-            2. Constant velocity (t_acc ≤ t < t_acc + t_flat)
-            q = q0 + s·[½·a·t_acc² + v_peak·(t - t_acc)]
-            q̇ = s·v_peak
-
-            3. Deceleration (t_acc + t_flat ≤ t < T)
-            q = q0 + s·[½·a·t_acc² + v_peak·t_flat
-                            + v_peak·t_d - ½·a·t_d²]
-            q̇ = s·(v_peak - a·t_d)
-            where t_d = t - (t_acc + t_flat)
-
-        Total duration:  T = 2·t_acc + t_flat
-        """
-        # Extract parameters for this joint
-        q0, s, a, t_acc, t_flat, T, dq = (
-            p["q0"], p["s"], p["a"], p["t_acc"], p["t_flat"], p["T"], p["dq"]
+        q0, s, a, t_acc, t_flat, T = (
+            p["q0"], p["s"], p["a"], p["t_acc"], p["t_flat"], p["T"]
         )
-
         if t <= 0:
             q, qd = q0, 0.0
-        elif t < t_acc:  # accelerating
+        elif t < t_acc:
             q = q0 + s * 0.5 * a * t**2
             qd = s * a * t
-        elif t < t_acc + t_flat:  # constant velocity
+        elif t < t_acc + t_flat:
             q = q0 + s * (0.5 * a * t_acc**2 + p["v_peak"] * (t - t_acc))
             qd = s * p["v_peak"]
-        elif t < T:  # decelerating
+        elif t < T:
             td = t - (t_acc + t_flat)
-            q = (q0 + s * (0.5 * a * t_acc**2 + p["v_peak"] * t_flat +
-                        p["v_peak"] * td - 0.5 * a * td**2))
+            q = q0 + s * (0.5 * a * t_acc**2 + p["v_peak"] * t_flat
+                          + p["v_peak"] * td - 0.5 * a * td**2)
             qd = s * (p["v_peak"] - a * td)
-        else:  # end of motion
+        else:
             q, qd = q0 + p["dq"], 0.0
         return q, qd
-    
+
     def _output_reference(self, context, output):
-        """Compute [q_ref, qd_ref] at current simulation time."""
         t = context.get_time()
-        q_ref, qd_ref = np.zeros(self.n), np.zeros(self.n)
-        for i, p in enumerate(self.profiles):
-            q_ref[i], qd_ref[i] = self._eval_trapezoid(t, p)
+
+        # Trouver le segment actif selon le temps
+        seg_idx = len(self.segments) - 1
+        for i in range(len(self.segments)):
+            if t < self.seg_offsets[i + 1]:
+                seg_idx = i
+                break
+
+        # Temps local dans le segment
+        t_local = t - self.seg_offsets[seg_idx]
+
+        q_ref = np.zeros(self.n)
+        qd_ref = np.zeros(self.n)
+        for i, p in enumerate(self.segments[seg_idx]):
+            q_ref[i], qd_ref[i] = self._eval_trapezoid(t_local, p)
+
         output.SetFromVector(np.hstack([q_ref, qd_ref]))
 
 
@@ -457,10 +425,12 @@ def create_sim_scene(sim_time_step):
     # Orientation pince vers le bas
     R_down = RollPitchYaw(np.pi, 0, 0).ToRotationMatrix()
 
-    #les différents points de positions
-    p_above = p_cube + np.array([0, 0, 0.2])
-    p_near = p_cube + np.array([0, 0, 0.02])
-    p_lift = p_cube + np.array([0, 0, 0.25])
+    # Offset pour compenser longueur des doigts
+    finger_offset = 0.10  
+
+    p_above = p_cube + np.array([0, 0, 0.2  + finger_offset])
+    p_near  = p_cube + np.array([0, 0, 0.02 + finger_offset])
+    p_lift  = p_cube + np.array([0, 0, 0.25 + finger_offset])
 
 
     # calcul transforms
@@ -473,10 +443,13 @@ def create_sim_scene(sim_time_step):
     q_near = solve_ik(plant, plant_context, frame_E, X_near)
     q_lift = solve_ik(plant, plant_context, frame_E, X_lift)
 
+    # Offset pour compenser longueur des doigts
+    finger_offset = 0.10  
+
     q_above = set_gripper(q_above, open=True)
     q_near = set_gripper(q_near, open=True)
     q_lift = set_gripper(q_lift, open=False)
-
+    
 
     q_list = [q_above, q_near, q_lift]
 
@@ -531,7 +504,15 @@ def create_sim_scene(sim_time_step):
 
     q_start = plant.GetPositions(plant_context)
     
-    traj_system = builder.AddSystem(JointSpaceTrajectorySystem(q_start, q_above, 0.2, 2.0))
+    #traj_system = builder.AddSystem(JointSpaceTrajectorySystem(q_start, q_above, 0.2, 2.0))
+    traj_system = builder.AddNamedSystem(
+    "Trajectory Generator",
+    JointSpaceTrajectorySystem(
+        waypoints=[q_start, q_above, q_near, q_lift],
+        v_max=0.2,
+        a_max=2.0,
+    )
+    )
 
     # des_pos = builder.AddNamedSystem("Desired position", ConstantVectorSource(q_target))
 
