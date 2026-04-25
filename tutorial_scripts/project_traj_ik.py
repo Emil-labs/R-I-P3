@@ -436,7 +436,7 @@ def create_sim_scene(sim_time_step):
 
     X_WE_desired = RigidTransform(
         RollPitchYaw(np.pi, 0, 0),
-        [0.64, 0.18, 0.455]
+        [0.58, 0.02, 0.455]
     )
 
     q_target = [-0.5, -1.5, 0.5, -1.356, 0.5, 0.5, 0.0, 0.0, 0.0]
@@ -466,8 +466,8 @@ def create_sim_scene(sim_time_step):
         JointSpaceTrajectorySystem(
             q_start=q_start_full,
             q_goal=q_target_full,
-            v_max=0.2,   # rad/s
-            a_max=2.0,    # rad/s²
+            v_max=0.5,   # rad/s
+            a_max=0.5,    # rad/s²
         )
     )
     # des_pos = builder.AddNamedSystem("Desired position", ConstantVectorSource(q_target))
@@ -504,7 +504,7 @@ def run_simulation(sim_time_step):
     
     # Run simulation and record for replays in MeshCat
     meshcat.StartRecording()
-    simulator.AdvanceTo(6.0)  # Adjust this time as needed
+    simulator.AdvanceTo(10.0)  # Adjust this time as needed
     meshcat.PublishRecording()
 
     # At the end of the simulation

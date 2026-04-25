@@ -362,9 +362,9 @@ def solve_ik(plant, context, frame_E, X_WE_desired):
 def set_gripper(q, open=True): 
     q = q.copy()
     if open: 
-        q[-2:] = [0.04, 0.04]
+        q[7:9] = [0.04, 0.04]
     else: 
-        q[-2:] = [0.0, 0.0]
+        q[7:9] = [0.0, 0.0]
     return q
 
 
@@ -389,6 +389,8 @@ def create_sim_scene(sim_time_step):
         "panda_finger_joint2"
     ]
     q_start = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.0, 0.0]
+    #q_start_full = plant.GetPositions(plant_context)
+    #plant.SetPositions(plant_context, q_start_full)
     # Find your robot (by name is safest)
     idx = 0
     for name, value in zip(joint_names, q_start):
@@ -416,21 +418,37 @@ def create_sim_scene(sim_time_step):
         if "cube" in model_name: 
             cubes.append(body)
 
+    targets = []
+
+    for i in range(plant.num_bodies()):
+        body = plant.get_body(BodyIndex(i))
+        model_name = plant.GetModelInstanceName(body.model_instance()).lower()
+        if "target" in model_name:
+            targets.append(body)
+
 
     cube_test = cubes[0]
     X_WCube = plant.EvalBodyPoseInWorld(plant_context, cube_test)
     p_cube = X_WCube.translation()
 
+    target_test = targets[1]
+    X_WTarget = plant.EvalBodyPoseInWorld(plant_context, target_test)
+    p_target = X_WTarget.translation()
+
+    # Offset pour compenser longueur des doigts
+    finger_offset = 0.10
  
     # Orientation pince vers le bas
     R_down = RollPitchYaw(np.pi, 0, 0).ToRotationMatrix()
 
-    # Offset pour compenser longueur des doigts
-    finger_offset = 0.10  
 
     p_above = p_cube + np.array([0, 0, 0.2  + finger_offset])
-    p_near  = p_cube + np.array([0, 0, 0.02 + finger_offset])
-    p_lift  = p_cube + np.array([0, 0, 0.25 + finger_offset])
+    p_near  = p_cube + np.array([0, 0, 0.01 + finger_offset])
+    p_lift  = p_cube + np.array([0, 0, 0.2 + finger_offset])
+
+    pt_above = p_target + np.array([0, 0, 0.2 + finger_offset])
+    pt_near = p_target + np.array([0, 0, 0.02 + finger_offset])
+    pt_lift = p_target + np.array([0, 0, 0.2 + finger_offset])
 
 
     # calcul transforms
@@ -438,47 +456,35 @@ def create_sim_scene(sim_time_step):
     X_near  = RigidTransform(R_down, p_near)
     X_lift  = RigidTransform(R_down, p_lift)
 
+    Xt_above = RigidTransform(R_down, pt_above)
+    Xt_near = RigidTransform(R_down, pt_near)
+    Xt_lift = RigidTransform(R_down, pt_lift)
+
 
     q_above = solve_ik(plant, plant_context, frame_E, X_above)
     q_near = solve_ik(plant, plant_context, frame_E, X_near)
     q_lift = solve_ik(plant, plant_context, frame_E, X_lift)
 
-    # Offset pour compenser longueur des doigts
-    finger_offset = 0.10  
+    qt_above = solve_ik(plant, plant_context, frame_E, Xt_above)
+    qt_near = solve_ik(plant, plant_context, frame_E, Xt_near)
+    qt_lift = solve_ik(plant, plant_context, frame_E, Xt_lift)
+
+
 
     q_above = set_gripper(q_above, open=True)
     q_near = set_gripper(q_near, open=True)
+    q_nearC = set_gripper(q_near,open=False)
     q_lift = set_gripper(q_lift, open=False)
+
+    qt_above = set_gripper(qt_above, open=False)
+    qt_near = set_gripper(qt_near, open=False)
+    qt_nearO = set_gripper(qt_near, open=True)
+    qt_lift = set_gripper(qt_lift, open=True)
     
 
     q_list = [q_above, q_near, q_lift]
 
-    q_start_full = plant.GetPositions(plant_context)
-    q_start_jaco = np.array([q_start_full[i] for i in pos_indices])
-    print(q_start_jaco)
-    print(q_start_full)
 
-    plant.SetPositions(plant_context, q_start_full)
-
-    X_WE_desired = RigidTransform(
-        RollPitchYaw(np.pi, 0, 0),
-        [0.64, 0.18, 0.455]
-    )
-
-    q_target = [-0.5, -1.5, 0.5, -1.356, 0.5, 0.5, 0.0, 0.0, 0.0]
-
-    #q_target = solve_ik(plant, plant_context, frame_E, X_WE_desired)
-
-    print("ttttt:",q_target)
-    print(len(q_target))
-
-    print(plant.GetDefaultPositions())
-    print(len(plant.GetDefaultPositions()))
-    #q_target_full = plant.GetPositions(plant_context)
-    #q_target_full[:9] = q_target
-    q_target_full = q_target
-
-    print(q_target_full)
 
 
     # Add visualization to see the geometries in MeshCat
@@ -508,9 +514,9 @@ def create_sim_scene(sim_time_step):
     traj_system = builder.AddNamedSystem(
     "Trajectory Generator",
     JointSpaceTrajectorySystem(
-        waypoints=[q_start, q_above, q_near, q_lift],
-        v_max=0.2,
-        a_max=2.0,
+        waypoints=[q_above, q_near, q_nearC, q_lift,qt_near,qt_nearO],
+        v_max=0.3,
+        a_max=0.5,
     )
     )
 
@@ -534,13 +540,13 @@ def create_sim_scene(sim_time_step):
 
     # Build and return the diagram
     diagram = builder.Build()
-    return diagram, logger_state, logger_traj, q_target_full
+    return diagram, logger_state, logger_traj
 
  ######################################################################################################
 
 # Create a function to run the simulation scene and save the block diagram:
 def run_simulation(sim_time_step):
-    diagram, logger_state, logger_traj, q_target = create_sim_scene(sim_time_step)
+    diagram, logger_state, logger_traj = create_sim_scene(sim_time_step)
     simulator = Simulator(diagram)
     simulator_context = simulator.get_mutable_context()
     simulator.Initialize()
@@ -550,7 +556,7 @@ def run_simulation(sim_time_step):
     
     # Run simulation and record for replays in MeshCat
     meshcat.StartRecording()
-    simulator.AdvanceTo(6.0)  # Adjust this time as needed
+    simulator.AdvanceTo(25.0)  # Adjust this time as needed
     meshcat.PublishRecording()
 
     # At the end of the simulation
