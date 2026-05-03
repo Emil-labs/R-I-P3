@@ -237,7 +237,7 @@ def run_simulation(sim_time_step):
              #Application of IK to one Target
 
         # on prend la première target trouvée
-        target_test = targets[4]
+        target_test = targets[1]
 
         # on récupère sa vraie position dans le monde
         X_WTarget = plant.EvalBodyPoseInWorld(plant_context, target_test)

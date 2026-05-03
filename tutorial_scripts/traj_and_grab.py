@@ -431,7 +431,7 @@ def create_sim_scene(sim_time_step):
     X_WCube = plant.EvalBodyPoseInWorld(plant_context, cube_test)
     p_cube = X_WCube.translation()
 
-    target_test = targets[1]
+    target_test = targets[0]
     X_WTarget = plant.EvalBodyPoseInWorld(plant_context, target_test)
     p_target = X_WTarget.translation()
 
@@ -469,6 +469,13 @@ def create_sim_scene(sim_time_step):
     qt_near = solve_ik(plant, plant_context, frame_E, Xt_near)
     qt_lift = solve_ik(plant, plant_context, frame_E, Xt_lift)
 
+    print("q_above :", q_above is not None)
+    print("q_near  :", q_near is not None)
+    print("q_lift  :", q_lift is not None)
+
+    print("qt_above:", qt_above is not None)
+    print("qt_near :", qt_near is not None)
+    print("qt_lift :", qt_lift is not None)
 
 
     q_above = set_gripper(q_above, open=True)
