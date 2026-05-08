@@ -525,13 +525,13 @@ def create_sim_scene(sim_time_step):
         X_WTarget = plant.EvalBodyPoseInWorld(plant_context, target_body)
         p_target = X_WTarget.translation()
 
-        p_above = p_cube + np.array([0, 0, 0.20 + finger_offset])
-        p_near = p_cube + np.array([0, 0, 0.01 + finger_offset])
-        p_lift = p_cube + np.array([0, 0, 0.20 + finger_offset])
+        p_above = p_cube + np.array([0, 0, 0.05 + finger_offset])
+        p_near = p_cube + np.array([0, 0, 0 + finger_offset])
+        p_lift = p_cube + np.array([0, 0, 0.13 + finger_offset])
 
-        pt_above = p_target + np.array([0, 0, 0.20 + finger_offset])
-        pt_near = p_target + np.array([0, 0, 0.02 + finger_offset])
-        pt_lift = p_target + np.array([0, 0, 0.20 + finger_offset])
+        pt_above = p_target + np.array([0, 0, 0.05 + finger_offset]) # target vertical offset
+        pt_near = p_target + np.array([0, 0, 0 + finger_offset])
+        pt_lift = p_target + np.array([0, 0, 0.08 + finger_offset])
 
         
 
@@ -673,7 +673,7 @@ def run_simulation(sim_time_step):
     
     # Run simulation and record for replays in MeshCat
     meshcat.StartRecording()
-    simulator.AdvanceTo(100.0)  # Adjust this time as needed
+    simulator.AdvanceTo(66.0)  # Adjust this time as needed
     meshcat.PublishRecording()
 
     # At the end of the simulation
