@@ -106,7 +106,6 @@ class Controller(LeafSystem):
         self.nq = plant.num_positions()
         self.nv = plant.num_velocities()
         self.nu = plant.num_actuators()
-        print("nq",self.nq,"nv",self.nv,"nu",self.nu)
 
         # Jaco joints and their indices in q and v
         self.joints = [plant.GetJointByName(name) for name in joint_names]
@@ -445,10 +444,10 @@ def create_sim_scene(sim_time_step):
     # Definition of each task, with each containing several waypoints
     tasks = [
         (cubes[0], targets[0], 0),
-        # (cubes[1], targets[2], 0),
-        # (cubes[2], targets[1], np.pi / 2),
-        # (cubes[3], targets[3], 0),
-        # (cubes[4], targets[4], 0),
+        (cubes[1], targets[2], 0),
+        (cubes[2], targets[1], np.pi / 2),
+        (cubes[3], targets[3], 0),
+        (cubes[4], targets[4], 0),
     ]
 
     q_start = plant.GetPositions(plant_context)
@@ -603,7 +602,7 @@ def run_simulation(sim_time_step):
     
     # Run simulation and record for replays in MeshCat
     meshcat.StartRecording()
-    simulator.AdvanceTo(10.0)  # Adjust this time as needed
+    simulator.AdvanceTo(66.0)  # Adjust this time as needed
     meshcat.PublishRecording()
 
     # At the end of the simulation
