@@ -48,7 +48,7 @@ robot_path = os.path.join(
     "..", "models", "objects_scenes", "project_03_shape_formation_t_world.sdf"
 )
 
-def plot_joint_tracking(logger_state, logger_traj, simulator_context, num_joints=9):
+def plot_joint_tracking(logger_state, logger_traj, simulator_context,plant, num_joints=9):
     """
     Plot actual vs reference joint positions and velocities from logs.
     """
@@ -57,10 +57,13 @@ def plot_joint_tracking(logger_state, logger_traj, simulator_context, num_joints
 
     time = log_state.sample_times()
     q_actual = log_state.data()[:num_joints, :]
-    qdot_actual = log_state.data()[num_joints:, :]
+
+    # vector is much larger due to the big sdf, so we need to advance to find the velocities.
+    vel_ind = plant.num_positions() #position in the logger where velocities begin
+    qdot_actual = log_state.data()[vel_ind:num_joints+vel_ind, :]
 
     q_ref = log_traj.data()[:num_joints, :]
-    qdot_ref = log_traj.data()[num_joints:, :]
+    qdot_ref = log_traj.data()[vel_ind:num_joints+vel_ind, :]
 
     # --- Joint positions ---
     fig, axes = plt.subplots(7, 1, figsize=(12, 14), sharex=True)
@@ -84,7 +87,7 @@ def plot_joint_tracking(logger_state, logger_traj, simulator_context, num_joints
         axes[i].set_ylabel(f'Joint {i+1} [rad/s]')
         axes[i].legend()
         axes[i].grid(True)
-        axes[i].set_ylim(-1.0, 1.0)
+        axes[i].set_ylim(-0.4, 0.4)
     axes[-1].set_xlabel('Time [s]')
     fig.suptitle('Joint Velocities: Actual vs Reference')
     plt.tight_layout(rect=[0, 0, 1, 0.97])
@@ -103,6 +106,7 @@ class Controller(LeafSystem):
         self.nq = plant.num_positions()
         self.nv = plant.num_velocities()
         self.nu = plant.num_actuators()
+        print("nq",self.nq,"nv",self.nv,"nu",self.nu)
 
         # Jaco joints and their indices in q and v
         self.joints = [plant.GetJointByName(name) for name in joint_names]
@@ -375,7 +379,7 @@ def create_sim_scene(sim_time_step):
     builder = DiagramBuilder()
     plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=sim_time_step)
     parser = Parser(plant)
-    model_instances = parser.AddModelsFromUrl("file://" + os.path.abspath(robot_path))
+    parser.AddModelsFromUrl("file://" + os.path.abspath(robot_path))
 
     joint_names = [
         "panda_joint1",
@@ -389,9 +393,6 @@ def create_sim_scene(sim_time_step):
         "panda_finger_joint2"
     ]
     q_start = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.0, 0.0]
-    #q_start_full = plant.GetPositions(plant_context)
-    #plant.SetPositions(plant_context, q_start_full)
-    # Find your robot (by name is safest)
     idx = 0
     for name, value in zip(joint_names, q_start):
         joint = plant.GetJointByName(name)
@@ -403,29 +404,15 @@ def create_sim_scene(sim_time_step):
 
     plant.Finalize()
 
-    joints = [plant.GetJointByName(name) for name in joint_names]
-    pos_indices = [j.position_start() for j in joints]
-    vel_indices = [j.velocity_start() for j in joints]
+    #joints = [plant.GetJointByName(name) for name in joint_names]
+    #pos_indices = [j.position_start() for j in joints]
+    #vel_indices = [j.velocity_start() for j in joints]
 
     plant_context = plant.CreateDefaultContext()
     frame_E = plant.GetFrameByName("panda_hand")
 
-    #Ligne 427 à 441 on peut améliorer en mettant tout en un non?:
-    #cubes = []
-    #targets = []
-
-    #for i in range(plant.num_bodies()):
-    #    body = plant.get_body(BodyIndex(i))
-    #    model_name = plant.GetModelInstanceName(body.model_instance()).lower()
-
-    #    if "cube" in model_name:
-    #        cubes.append(body)
-
-    #    if "target" in model_name:
-    #        targets.append(body)
-    
+    # Retrieving coordinates for each target and cube in the sdf
     cubes = []
-
     for i in range(plant.num_bodies()): 
         body = plant.get_body(BodyIndex(i))
         model_name = plant.GetModelInstanceName(body.model_instance()).lower()
@@ -433,7 +420,6 @@ def create_sim_scene(sim_time_step):
             cubes.append(body)
 
     targets = []
-
     for i in range(plant.num_bodies()):
         body = plant.get_body(BodyIndex(i))
         model_name = plant.GetModelInstanceName(body.model_instance()).lower()
@@ -441,28 +427,11 @@ def create_sim_scene(sim_time_step):
             targets.append(body)
 
 
-    #cube_test = cubes[0]
-    #X_WCube = plant.EvalBodyPoseInWorld(plant_context, cube_test)
-    #p_cube = X_WCube.translation()
-
-    #target_test = targets[1]
-    #X_WTarget = plant.EvalBodyPoseInWorld(plant_context, target_test)
-    #p_target = X_WTarget.translation()
-
-    # Offset pour compenser longueur des doigts
+    # Offset to account finger length
     finger_offset = 0.10
  
-    # Orientation pince vers le bas
+    # Orients the End-effector downwards
     R_down = RollPitchYaw(np.pi, 0, 0).ToRotationMatrix()
-    #R_rotated_down = RollPitchYaw(np.pi, 0, np.pi / 2).ToRotationMatrix()
-
-    tasks = [
-        (cubes[0], targets[0], 0),
-        (cubes[1], targets[2], 0),
-        (cubes[2], targets[1], np.pi / 2 ),
-        (cubes[3], targets[3], 0),
-        (cubes[4], targets[4], 0),
-    ]
 
     lower = plant.GetPositionLowerLimits()
     upper = plant.GetPositionUpperLimits()
@@ -473,51 +442,19 @@ def create_sim_scene(sim_time_step):
         q[6] = np.clip(q[6], lower[6], upper[6])
         return q
 
-    #p_above = p_cube + np.array([0, 0, 0.2  + finger_offset])
-    #p_near  = p_cube + np.array([0, 0, 0.01 + finger_offset])
-    #p_lift  = p_cube + np.array([0, 0, 0.2 + finger_offset])
-
-    #pt_above = p_target + np.array([0, 0, 0.2 + finger_offset])
-    #pt_near = p_target + np.array([0, 0, 0.02 + finger_offset])
-    #pt_lift = p_target + np.array([0, 0, 0.2 + finger_offset])
-
-
-    # calcul transforms
-    #X_above = RigidTransform(R_down, p_above)
-    #X_near  = RigidTransform(R_down, p_near)
-    #X_lift  = RigidTransform(R_down, p_lift)
-
-    #Xt_above = RigidTransform(R_down, pt_above)
-    #Xt_near = RigidTransform(R_down, pt_near)
-    #Xt_lift = RigidTransform(R_down, pt_lift)
-
-
-    #q_above = solve_ik(plant, plant_context, frame_E, X_above)
-    #q_near = solve_ik(plant, plant_context, frame_E, X_near)
-    #q_lift = solve_ik(plant, plant_context, frame_E, X_lift)
-
-    #qt_above = solve_ik(plant, plant_context, frame_E, Xt_above)
-    #qt_near = solve_ik(plant, plant_context, frame_E, Xt_near)
-    #qt_lift = solve_ik(plant, plant_context, frame_E, Xt_lift)
-
-
-
-    #q_above = set_gripper(q_above, open=True)
-    #q_near = set_gripper(q_near, open=True)
-    #q_nearC = set_gripper(q_near,open=False)
-    #q_lift = set_gripper(q_lift, open=False)
-
-    #qt_above = set_gripper(qt_above, open=False)
-    #qt_near = set_gripper(qt_near, open=False)
-    #qt_nearO = set_gripper(qt_near, open=True)
-    #qt_lift = set_gripper(qt_lift, open=True)
-    
-
-    #q_list = [q_above, q_near, q_lift]
+    # Definition of each task, with each containing several waypoints
+    tasks = [
+        (cubes[0], targets[0], 0),
+        # (cubes[1], targets[2], 0),
+        # (cubes[2], targets[1], np.pi / 2),
+        # (cubes[3], targets[3], 0),
+        # (cubes[4], targets[4], 0),
+    ]
 
     q_start = plant.GetPositions(plant_context)
     waypoints = [set_gripper(q_start, open=True)]
 
+    # Waypoints definition for each task
     for task_idx, (cube_body, target_body, wrist_angle) in enumerate(tasks):
         X_WCube = plant.EvalBodyPoseInWorld(plant_context, cube_body)
         p_cube = X_WCube.translation()
@@ -533,43 +470,36 @@ def create_sim_scene(sim_time_step):
         pt_near = p_target + np.array([0, 0, 0 + finger_offset])
         pt_lift = p_target + np.array([0, 0, 0.08 + finger_offset])
 
-        
-
         q_above = solve_ik(
             plant,
             plant_context,
             frame_E,
             RigidTransform(R_down, p_above),
         )
-
         q_near = solve_ik(
             plant,
             plant_context,
             frame_E,
             RigidTransform(R_down, p_near),   
         )
-
         q_lift = solve_ik(
             plant,
             plant_context,
             frame_E,
             RigidTransform(R_down, p_lift),
         )
-
         qt_above = solve_ik(
             plant,
             plant_context,
             frame_E,
             RigidTransform(R_down, pt_above),
         )
-
         qt_near = solve_ik(
             plant,
             plant_context,
             frame_E,
             RigidTransform(R_down, pt_near),
         )
-
         qt_lift = solve_ik(
             plant,
             plant_context,
@@ -577,11 +507,11 @@ def create_sim_scene(sim_time_step):
             RigidTransform(R_down, pt_lift),
         )
 
-        # Sécurité si IK échoue
+        # Security if IK fails
         ik_solutions = [q_above, q_near, q_lift, qt_above, qt_near, qt_lift]
 
         if any(q is None for q in ik_solutions):
-            print(f"IK échoué pour la tâche {task_idx}. Cette tâche est ignorée.")
+            print(f"IK failed for task {task_idx}. Ignoring task...")
             continue
 
         q_above = rotate_joint7(q_above, wrist_angle)
@@ -657,13 +587,13 @@ def create_sim_scene(sim_time_step):
 
     # Build and return the diagram
     diagram = builder.Build()
-    return diagram, logger_state, logger_traj
+    return diagram, logger_state, logger_traj,plant
 
  ######################################################################################################
 
 # Create a function to run the simulation scene and save the block diagram:
 def run_simulation(sim_time_step):
-    diagram, logger_state, logger_traj = create_sim_scene(sim_time_step)
+    diagram, logger_state, logger_traj,plant = create_sim_scene(sim_time_step)
     simulator = Simulator(diagram)
     simulator_context = simulator.get_mutable_context()
     simulator.Initialize()
@@ -673,11 +603,11 @@ def run_simulation(sim_time_step):
     
     # Run simulation and record for replays in MeshCat
     meshcat.StartRecording()
-    simulator.AdvanceTo(66.0)  # Adjust this time as needed
+    simulator.AdvanceTo(10.0)  # Adjust this time as needed
     meshcat.PublishRecording()
 
     # At the end of the simulation
-    plot_joint_tracking(logger_state, logger_traj, simulator.get_context())
+    plot_joint_tracking(logger_state, logger_traj, simulator.get_context(),plant)
 
 # Run the simulation with a specific time step. Try gradually increasing it!
 run_simulation(sim_time_step=0.002)
